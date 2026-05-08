@@ -1,0 +1,156 @@
+# Notion Auto-Status Updater
+
+Proyek Node.js yang berjalan sebagai scheduler untuk memperbarui status card Notion secara otomatis berdasarkan tanggal dan group.
+
+---
+
+## Stack
+
+- **Runtime**: Node.js v18+
+- **Language**: JavaScript (CommonJS)
+- **Dependencies**: `@notionhq/client`, `node-cron`, `dotenv`
+
+---
+
+## Struktur Folder
+
+```
+notion-auto-status/
+  index.js          # Script utama, entry point
+  .env              # API key dan Database ID (tidak di-commit)
+  .gitignore
+  package.json
+```
+
+---
+
+## Environment Variables
+
+File `.env` wajib ada di root project:
+
+```
+NOTION_TOKEN=secret_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+NOTION_DATABASE_ID=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+---
+
+## Database Notion
+
+### Properti yang Digunakan Script
+
+| Nama Properti | Tipe di Notion    | Cara Akses di Kode                      |
+| ------------- | ----------------- | --------------------------------------- |
+| `Group`       | Select            | `props['Group']?.select?.name`          |
+| `Status`      | Status            | `props['Status']?.status?.name`         |
+| `Date`        | Date (bisa range) | `props['Date']?.date?.start` dan `.end` |
+| `Name`        | Title             | `props['Name']?.title?.[0]?.plain_text` |
+
+### Nilai Group yang Ada
+
+`Nta`, `Pribadi`, `TA`, `Kuliah`, `Content`, `Event`, `Resource`, `Work`
+
+### Nilai Status yang Ada
+
+**To Do group:**
+`Backlog`, `Planned`, `Not Started`, `Need Research`, `Waiting List`
+
+**In Progress group:**
+`Designing`, `Live`, `Coding`, `Revising`, `Testing`, `Review`, `Client Feedback`, `Deploying`
+
+**Complete group:**
+`Done`, `Published`, `Approved`, `Archived`, `Shipped`
+
+---
+
+## Logika Status
+
+### Card dengan Group = "Event"
+
+Menggunakan jam (datetime), bukan hanya tanggal. Bergantung pada date range di Notion.
+
+```
+Belum sampai dateStart          ->  Waiting List
+dateStart <= sekarang <= dateEnd ->  Live
+Setelah dateEnd                  ->  Done
+```
+
+Kalau date tidak punya jam (date only), `dateEnd` dianggap berakhir `23:59:59` di hari yang sama.
+
+### Card dengan Group selain "Event"
+
+Menggunakan selisih hari dari hari ini ke `dateStart`.
+
+```
+Selisih > 1 hari        ->  tidak diubah (biarkan user pilih manual)
+Selisih 0-1 hari        ->  In Progress
+Sudah lewat 1-3 hari    ->  tidak diubah (jeda manual)
+Sudah lewat > 3 hari    ->  Done (mulai hari ke-4 setelah deadline)
+```
+
+Status `To Do` (Backlog, Planned, dll) sengaja tidak disentuh otomatis supaya user bebas memilih secara manual selama belum mendekati deadline.
+
+---
+
+## Jadwal Cron
+
+Script berjalan **setiap jam** karena card Event bergantung pada jam.
+
+```javascript
+cron.schedule(
+  "0 * * * *",
+  () => {
+    updateStatuses();
+  },
+  {
+    timezone: "Asia/Jakarta",
+  },
+);
+```
+
+Timezone: `Asia/Jakarta` (WIB, UTC+7).
+
+---
+
+## Cara Menjalankan
+
+```bash
+# Test manual sekali jalan
+node index.js
+
+# Jalankan background dengan PM2
+pm2 start index.js --name 'notion-auto-status'
+pm2 save
+```
+
+---
+
+## Pola Kode
+
+Dua fungsi terpisah untuk dua jenis logika:
+
+- `getStatusForEvent(dateStart, dateEnd)` - khusus Group = Event
+- `getStatusForGeneral(dateStart)` - untuk Group lainnya
+
+Fungsi `updateStatuses()` adalah fungsi utama yang query semua card, memanggil salah satu fungsi di atas berdasarkan Group, lalu update via API kalau status berubah.
+
+---
+
+## Catatan Penting untuk Pengembangan
+
+- Nama properti di `props['NamaProp']` harus **sama persis** dengan nama kolom di Notion (case-sensitive, termasuk spasi)
+- Kalau menambah Group baru dengan logika status berbeda, tambahkan kondisi `else if` di fungsi `updateStatuses()` sebelum blok `else` general
+- Kalau Notion menambah properti baru ke database, tambahkan cara aksesnya di bagian tabel di atas
+- Jangan ubah jadwal cron menjadi harian (`0 6 * * *`) karena Event butuh pengecekan per jam
+- File `.env` tidak boleh di-commit. Kalau deploy ke GitHub Actions, masukkan ke repository secrets
+
+---
+
+## Rencana Pengembangan (Opsional)
+
+Fitur yang mungkin ditambahkan ke depan:
+
+- Filter hanya card yang belum `Done` / `Archived` untuk efisiensi query
+- Notifikasi ke Telegram atau email saat ada card yang statusnya berubah
+- Support pagination kalau database sudah punya lebih dari 100 card
+- Dry-run mode (`--dry-run`) untuk preview perubahan tanpa benar-benar update Notion

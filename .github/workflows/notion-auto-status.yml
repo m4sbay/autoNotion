@@ -1,0 +1,37 @@
+name: Notion Auto Status
+
+on:
+  schedule:
+    # GitHub Actions schedule uses UTC
+    - cron: "0 * * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: notion-auto-status
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run update (once)
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+          TZ: Asia/Jakarta
+        run: node run-once.js
+
