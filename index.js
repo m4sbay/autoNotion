@@ -1,6 +1,7 @@
 require("dotenv").config();
 const { Client } = require("@notionhq/client");
 const cron = require("node-cron");
+const nodemailer = require("nodemailer");
 
 const notion = new Client({ auth: process.env.NOTION_TOKEN });
 const DATABASE_ID = process.env.NOTION_DATABASE_ID;
@@ -43,6 +44,32 @@ function getStatusForGeneral(dateStart) {
   return null; // Lewat 1-3 hari, biarkan manual
 }
 
+async function sendDigestEmail(changes) {
+  if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD || !process.env.GMAIL_TO) return;
+
+  const transporter = nodemailer.createTransport({
+    service: "gmail",
+    auth: {
+      user: process.env.GMAIL_USER,
+      pass: process.env.GMAIL_APP_PASSWORD,
+    },
+  });
+
+  const timestamp = new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" });
+  const rows = changes
+    .map((c) => `• [${c.group}] "${c.title}": ${c.from} → ${c.to}`)
+    .join("\n");
+
+  await transporter.sendMail({
+    from: `Notion Auto Status <${process.env.GMAIL_USER}>`,
+    to: process.env.GMAIL_TO,
+    subject: `[Notion] ${changes.length} status diperbarui — ${timestamp}`,
+    text: `Status berikut diperbarui secara otomatis:\n\n${rows}\n\nDikirim oleh notion-auto-status.`,
+  });
+
+  console.log(`[Auto] Email digest dikirim (${changes.length} perubahan).`);
+}
+
 async function updateStatuses() {
   console.log("[Auto] Mengecek status...", new Date().toLocaleString("id-ID"));
 
@@ -54,6 +81,7 @@ async function updateStatuses() {
       throw new Error("Tidak menemukan data source pada database (db.data_sources[0].id kosong).");
     }
 
+    const changes = [];
     let startCursor = undefined;
     do {
       const response = await notion.dataSources.query({
@@ -90,10 +118,15 @@ async function updateStatuses() {
         const title =
           page.properties["Name"]?.title?.[0]?.plain_text || page.id.slice(0, 8);
         console.log(`  [${group}] "${title}": ${currentStatus} -> ${newStatus}`);
+        changes.push({ group, title, from: currentStatus, to: newStatus });
       }
 
       startCursor = response.has_more ? response.next_cursor : undefined;
     } while (startCursor);
+
+    if (changes.length > 0) {
+      await sendDigestEmail(changes);
+    }
 
     console.log("[Auto] Selesai.");
   } catch (err) {
