@@ -120,6 +120,74 @@ async function sendDigestEmail(changes) {
   console.log(`[Auto] Email digest dikirim (${changes.length} perubahan).`);
 }
 
+async function sendReminderEmail(reminders) {
+  if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD || !process.env.GMAIL_TO) return;
+
+  const transporter = nodemailer.createTransport({
+    service: "gmail",
+    auth: {
+      user: process.env.GMAIL_USER,
+      pass: process.env.GMAIL_APP_PASSWORD,
+    },
+  });
+
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowLabel = tomorrow.toLocaleDateString("id-ID", {
+    weekday: "long", day: "numeric", month: "long", year: "numeric",
+    timeZone: "Asia/Jakarta",
+  });
+
+  const tableRows = reminders.map((r) => {
+    const timeLabel = r.time
+      ? `<span style="font-size:13px;color:#f59e0b;font-weight:600">${r.time}</span>`
+      : `<span style="font-size:12px;color:#94a3b8">—</span>`;
+    return `
+    <tr>
+      <td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;color:#1e293b;font-size:14px">${r.group || "—"}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;color:#1e293b;font-size:14px;font-weight:500">${r.title}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;text-align:center">${timeLabel}</td>
+    </tr>`;
+  }).join("");
+
+  const html = `<!DOCTYPE html>
+<html>
+<body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
+  <div style="max-width:560px;margin:32px auto;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.08)">
+    <div style="background:#1e293b;padding:24px 28px">
+      <p style="margin:0;font-size:11px;font-weight:600;letter-spacing:1px;color:#64748b;text-transform:uppercase">Second Brain · Reminder</p>
+      <h1 style="margin:6px 0 0;font-size:20px;color:#f8fafc;font-weight:600">${reminders.length} agenda besok</h1>
+      <p style="margin:4px 0 0;font-size:13px;color:#64748b">${tomorrowLabel}</p>
+    </div>
+    <div style="padding:8px 0">
+      <table style="width:100%;border-collapse:collapse">
+        <thead>
+          <tr style="background:#f8fafc">
+            <th style="padding:8px 12px;text-align:left;font-size:11px;font-weight:600;color:#94a3b8;letter-spacing:0.5px;text-transform:uppercase">Group</th>
+            <th style="padding:8px 12px;text-align:left;font-size:11px;font-weight:600;color:#94a3b8;letter-spacing:0.5px;text-transform:uppercase">Nama</th>
+            <th style="padding:8px 12px;text-align:center;font-size:11px;font-weight:600;color:#94a3b8;letter-spacing:0.5px;text-transform:uppercase">Jam Mulai</th>
+          </tr>
+        </thead>
+        <tbody>${tableRows}</tbody>
+      </table>
+    </div>
+    <div style="padding:16px 28px;border-top:1px solid #f1f5f9">
+      <p style="margin:0;font-size:12px;color:#cbd5e1">Dikirim otomatis oleh Second Brain</p>
+    </div>
+  </div>
+</body>
+</html>`;
+
+  await transporter.sendMail({
+    from: `Second Brain <${process.env.GMAIL_USER}>`,
+    to: process.env.GMAIL_TO,
+    subject: `[Second Brain] ${reminders.length} agenda besok — ${tomorrowLabel}`,
+    html,
+  });
+
+  console.log(`[Auto] Email reminder dikirim (${reminders.length} agenda besok).`);
+}
+
 async function updateStatuses() {
   console.log("[Auto] Mengecek status...", new Date().toLocaleString("id-ID"));
 
@@ -131,7 +199,18 @@ async function updateStatuses() {
       throw new Error("Tidak menemukan data source pada database (db.data_sources[0].id kosong).");
     }
 
+    // Cek apakah sekarang jam 07.00 WIB untuk kirim reminder H-1
+    const nowWIB = new Date().toLocaleString("en-US", { timeZone: "Asia/Jakarta" });
+    const hourWIB = new Date(nowWIB).getHours();
+    const isReminderHour = hourWIB === 7;
+
+    // Hitung tanggal besok (WIB) untuk filter reminder
+    const tomorrowWIB = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Jakarta" }));
+    tomorrowWIB.setDate(tomorrowWIB.getDate() + 1);
+    const tomorrowDateStr = tomorrowWIB.toISOString().slice(0, 10); // "YYYY-MM-DD"
+
     const changes = [];
+    const reminders = [];
     let startCursor = undefined;
     do {
       const response = await notion.dataSources.query({
@@ -146,6 +225,17 @@ async function updateStatuses() {
         const dateStart = props["Date"]?.date?.start;
         const dateEnd = props["Date"]?.date?.end; // bisa null kalau single date
         const currentStatus = props["Status"]?.status?.name;
+        const title = props["Name"]?.title?.[0]?.plain_text || page.id.slice(0, 8);
+
+        // Kumpulkan reminder H-1 (hanya di jam 07.00 WIB)
+        if (isReminderHour && dateStart && dateStart.slice(0, 10) === tomorrowDateStr) {
+          const time = dateStart.includes("T")
+            ? new Date(dateStart).toLocaleTimeString("id-ID", {
+                hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta",
+              })
+            : null;
+          reminders.push({ group, title, time });
+        }
 
         let newStatus = null;
 
@@ -165,8 +255,6 @@ async function updateStatuses() {
           },
         });
 
-        const title =
-          page.properties["Name"]?.title?.[0]?.plain_text || page.id.slice(0, 8);
         console.log(`  [${group}] "${title}": ${currentStatus} -> ${newStatus}`);
         changes.push({ group, title, from: currentStatus, to: newStatus });
       }
@@ -176,6 +264,10 @@ async function updateStatuses() {
 
     if (changes.length > 0) {
       await sendDigestEmail(changes);
+    }
+
+    if (reminders.length > 0) {
+      await sendReminderEmail(reminders);
     }
 
     console.log("[Auto] Selesai.");
