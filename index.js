@@ -7,7 +7,7 @@ const DATABASE_ID = process.env.NOTION_DATABASE_ID;
 
 // Logika khusus untuk Group = "Event"
 function getStatusForEvent(dateStart, dateEnd) {
-  if (!dateStart) return "Waiting List";
+  if (!dateStart) return "Backlog";
 
   const now = new Date();
   const start = new Date(dateStart);
@@ -18,8 +18,9 @@ function getStatusForEvent(dateStart, dateEnd) {
     end.setHours(23, 59, 59, 999);
   }
 
-  if (now < start) return "Waiting List"; // Belum sampai hari H
-  if (now >= start && now <= end) return "Live"; // Sedang berlangsung
+  if (now < start) return "Up Next"; // Belum sampai hari H
+  if (now >= start && now <= end) return "In Progress"; // Sedang berlangsung
+  if (now - end > 30 * 24 * 60 * 60 * 1000) return "Archived"; // Lewat > 30 hari
   return "Done"; // Sudah selesai
 }
 
@@ -37,6 +38,7 @@ function getStatusForGeneral(dateStart) {
 
   if (diffDays > 1) return null; // Lebih dari H-1, biarkan manual
   if (diffDays >= 0) return "In Progress"; // H-1 atau Hari H
+  if (diffDays < -30) return "Archived"; // Lewat lebih dari 30 hari
   if (diffDays < -3) return "Done"; // Lewat lebih dari 3 hari kalender (hari ke-4+)
   return null; // Lewat 1-3 hari, biarkan manual
 }
