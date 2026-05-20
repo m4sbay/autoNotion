@@ -56,15 +56,65 @@ async function sendDigestEmail(changes) {
   });
 
   const timestamp = new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" });
-  const rows = changes
-    .map((c) => `• [${c.group}] "${c.title}": ${c.from} → ${c.to}`)
-    .join("\n");
+
+  const statusColor = {
+    "Backlog": "#94a3b8",
+    "Up Next": "#60a5fa",
+    "In Progress": "#f59e0b",
+    "Waiting": "#a78bfa",
+    "Done": "#34d399",
+    "Archived": "#6b7280",
+  };
+
+  const badge = (label) => {
+    const color = statusColor[label] || "#94a3b8";
+    return `<span style="display:inline-block;padding:2px 10px;border-radius:999px;background:${color}22;color:${color};border:1px solid ${color}66;font-size:12px;font-weight:600">${label}</span>`;
+  };
+
+  const tableRows = changes.map((c) => `
+    <tr>
+      <td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;color:#1e293b;font-size:14px">${c.group}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;color:#1e293b;font-size:14px;font-weight:500">${c.title}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #f1f5f9">${badge(c.from)}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;color:#94a3b8;font-size:18px;text-align:center">→</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #f1f5f9">${badge(c.to)}</td>
+    </tr>`).join("");
+
+  const html = `<!DOCTYPE html>
+<html>
+<body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
+  <div style="max-width:560px;margin:32px auto;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.08)">
+    <div style="background:#1e293b;padding:24px 28px">
+      <p style="margin:0;font-size:11px;font-weight:600;letter-spacing:1px;color:#64748b;text-transform:uppercase">Second Brain</p>
+      <h1 style="margin:6px 0 0;font-size:20px;color:#f8fafc;font-weight:600">${changes.length} status diperbarui</h1>
+      <p style="margin:4px 0 0;font-size:13px;color:#64748b">${timestamp}</p>
+    </div>
+    <div style="padding:8px 0">
+      <table style="width:100%;border-collapse:collapse">
+        <thead>
+          <tr style="background:#f8fafc">
+            <th style="padding:8px 12px;text-align:left;font-size:11px;font-weight:600;color:#94a3b8;letter-spacing:0.5px;text-transform:uppercase">Group</th>
+            <th style="padding:8px 12px;text-align:left;font-size:11px;font-weight:600;color:#94a3b8;letter-spacing:0.5px;text-transform:uppercase">Nama</th>
+            <th style="padding:8px 12px;text-align:left;font-size:11px;font-weight:600;color:#94a3b8;letter-spacing:0.5px;text-transform:uppercase">Dari</th>
+            <th></th>
+            <th style="padding:8px 12px;text-align:left;font-size:11px;font-weight:600;color:#94a3b8;letter-spacing:0.5px;text-transform:uppercase">Ke</th>
+          </tr>
+        </thead>
+        <tbody>${tableRows}</tbody>
+      </table>
+    </div>
+    <div style="padding:16px 28px;border-top:1px solid #f1f5f9">
+      <p style="margin:0;font-size:12px;color:#cbd5e1">Dikirim otomatis oleh Second Brain</p>
+    </div>
+  </div>
+</body>
+</html>`;
 
   await transporter.sendMail({
-    from: `Notion Auto Status <${process.env.GMAIL_USER}>`,
+    from: `Second Brain <${process.env.GMAIL_USER}>`,
     to: process.env.GMAIL_TO,
-    subject: `[Notion] ${changes.length} status diperbarui — ${timestamp}`,
-    text: `Status berikut diperbarui secara otomatis:\n\n${rows}\n\nDikirim oleh notion-auto-status.`,
+    subject: `[Second Brain] ${changes.length} status diperbarui — ${timestamp}`,
+    html,
   });
 
   console.log(`[Auto] Email digest dikirim (${changes.length} perubahan).`);
